@@ -1,5 +1,6 @@
 """Per-league expected-points model: MLB negative binomial, NHL Poisson,
-NBA/NFL keep the OLS blend. Win probabilities and spreads are unchanged."""
+NBA regulation/OT pace-efficiency, NFL keeps the OLS blend. Win probabilities
+and spreads are unchanged."""
 import numpy as np
 import pandas as pd
 from bayesratings.games import validate_games
@@ -10,7 +11,8 @@ from bayesratings.team_stats import compute_team_stats
 # 1. league mapping
 assert points_model_for("mlb") == "negbin" and points_model_for("MLB") == "negbin"
 assert points_model_for("nhl") == "poisson"
-assert points_model_for("nba") == "ols" and points_model_for("nfl") == "ols"
+assert points_model_for("nba") == "pace" and points_model_for("NBA") == "pace"
+assert points_model_for("nfl") == "ols"
 print("ok league mapping")
 
 # 2. Poisson IRLS recovers known coefficients
@@ -47,7 +49,7 @@ sched = validate_games(pd.DataFrame([
      "home_score": np.nan, "away_score": np.nan, "neutral": 1}]))
 sw = sched.rename(columns={"home_team": "away_team", "away_team": "home_team"})
 fc = {}
-for pm in ("ols", "poisson", "negbin"):
+for pm in ("ols", "poisson", "negbin", "pace"):
     hyb = fit_hybrid_models(games, ratings, stats["team_stats"], points_model=pm)
     assert hyb["points_model"] == pm
     fc[pm] = forecast_games(sched, ratings, stats["team_stats"], hyb, stats["league_avg_points"])
@@ -56,17 +58,22 @@ for pm in ("ols", "poisson", "negbin"):
     assert abs(fc[pm].home_total_pred[1] - f2.away_total_pred[1]) < 0.11
     assert abs(fc[pm].home_prob[1] - f2.away_prob[1]) < 1e-3
     assert (fc[pm].total_pred - fc[pm].home_total_pred - fc[pm].away_total_pred).abs().max() < 0.11
-    if pm != "ols":
+    if pm in ("poisson", "negbin"):
         assert hyb["home_count_fit"].family == pm
         if pm == "poisson":
             assert hyb["home_count_fit"].alpha == 0 and hyb["away_count_fit"].alpha == 0
+    if pm == "pace":
+        # score-only synthetic frame lacks box-score possessions -> falls back to OLS
+        assert hyb["pace_fit"] is None
     # team points line up with the spread (margin reconciliation)
     diff = fc[pm].home_total_pred - fc[pm].away_total_pred
     assert (diff + fc[pm].home_spread).abs().max() < 0.21, pm
 # win probabilities and spreads identical across points models
-for pm in ("poisson", "negbin"):
+for pm in ("poisson", "negbin", "pace"):
     for c in ("home_prob", "away_prob", "home_spread", "home_odds"):
         assert (fc[pm][c].values == fc["ols"][c].values).all(), c
+# score-only pace fallback matches OLS totals exactly
+assert (fc["pace"].total_pred.values == fc["ols"].total_pred.values).all()
 # Poisson and NB share the same mean model
 assert (fc["poisson"].total_pred.values == fc["negbin"].total_pred.values).all()
 # count model totals differ from the OLS blend

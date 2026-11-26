@@ -26,11 +26,17 @@ def forecast_games(schedule: pd.DataFrame, ratings: pd.Series,
         feats = build_features(sched, ratings, team_stats, warn_unknown=warn)
         prob = np.asarray(hybrid["winprob_fit"].predict(feats), dtype=float)
         margin = np.asarray(hybrid["mov_fit"].predict(feats), dtype=float)
-        if hybrid.get("points_model", "ols") != "ols":
+        pm = hybrid.get("points_model", "ols")
+        if pm in ("poisson", "negbin"):
             # count GLM (Poisson / negative binomial): expected points are the
             # GLM means directly, no OLS / OS*DS blend
             pts_h = np.asarray(hybrid["home_count_fit"].predict(feats), dtype=float)
             pts_a = np.asarray(hybrid["away_count_fit"].predict(feats), dtype=float)
+            return prob, margin, pts_h, pts_a
+        if pm == "pace" and hybrid.get("pace_fit") is not None:
+            # opponent-adjusted regulation pace-efficiency points; margin-dependent
+            # overtime lift is added after neutral-site margin averaging below
+            pts_h, pts_a = hybrid["pace_fit"].predict_regulation(sched)
             return prob, margin, pts_h, pts_a
         reg_h = np.maximum(np.asarray(hybrid["home_pts_fit"].predict(feats), dtype=float), 0)
         reg_a = np.maximum(np.asarray(hybrid["away_pts_fit"].predict(feats), dtype=float), 0)
@@ -54,6 +60,11 @@ def forecast_games(schedule: pd.DataFrame, ratings: pd.Series,
         new_h = np.where(neutral, (pts_home + s_pts_a) / 2, pts_home)
         new_a = np.where(neutral, (pts_away + s_pts_h) / 2, pts_away)
         pts_home, pts_away = new_h, new_a
+
+    if hybrid.get("points_model") == "pace" and hybrid.get("pace_fit") is not None:
+        ot_lift = hybrid["pace_fit"].expected_ot_points(home_margin)
+        pts_home = pts_home + 0.5 * ot_lift
+        pts_away = pts_away + 0.5 * ot_lift
 
     # home_prob is rounded first, and the odds come from that rounded value.
     home_prob_r = np.round(home_prob, 4)

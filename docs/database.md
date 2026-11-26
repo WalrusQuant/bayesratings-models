@@ -42,7 +42,7 @@ in-memory forecast frame (`home_odds`, `away_odds`), from
 | `player_game_nhl_skater`, `player_game_nhl_goalie` | NHL box lines. The goalie with the most time on ice is the starter. |
 | `player_game_nfl_passing`, `player_game_nfl_rushing`, `player_game_nfl_receiving`, `player_game_nfl_other` | NFL box lines. The quarterback with the most attempts is the starter. |
 | `player_extract_log` | Which summaries have been extracted, and at which parser version. |
-| `team_game_stats` | Team totals for and against, from the stored summary. The NFL player model reads yards allowed from here. |
+| `team_game_stats` | Team totals for and against, from the stored summary. The NFL player model reads yards allowed from here, and the NBA totals model reads possessions, minutes and regulation points. |
 | `player_values` | Each player's daily value from the same running sums the adjustments use. Display only. A failure here does not fail the fit. |
 
 ## Pre-game log
