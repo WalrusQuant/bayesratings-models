@@ -163,14 +163,20 @@ class _LogisticModel:
         return 1.0 / (1.0 + np.exp(-eta))
 
 
-# Expected-points model per league, chosen by the 2026-10 walk-forward backtest.
-# Leagues not listed keep the OLS blend.
+# Expected-points model per league: MLB negative binomial and NHL Poisson
+# from the 2026-10 walk-forward. NBA defaults to the OLS blend and switches
+# to "pace" when BAYESRATINGS_NBA_TOTALS=pace is set (falling back to OLS if
+# box-score pace columns are absent). Leagues not listed keep the OLS blend.
 POINTS_MODELS = {"mlb": "negbin", "nhl": "poisson"}
-VALID_POINTS_MODELS = ("ols", "poisson", "negbin")
+VALID_POINTS_MODELS = ("ols", "poisson", "negbin", "pace")
 
 
 def points_model_for(league) -> str:
-    return POINTS_MODELS.get(str(league).lower(), "ols")
+    lg = str(league).lower()
+    if lg == "nba":
+        from .config import nba_points_model
+        return nba_points_model()
+    return POINTS_MODELS.get(lg, "ols")
 
 
 def fit_hybrid_models(games: pd.DataFrame, ratings: pd.Series,
@@ -204,11 +210,14 @@ def fit_hybrid_models(games: pd.DataFrame, ratings: pd.Series,
         "away_pts_fit": _LinearModel(_fit_ols(X, feats["away_score"], w)),
         "winprob_fit": _LogisticModel(_fit_logistic(X, feats["h_win"], sample_weight=w)),
     }
-    if points_model != "ols":
+    if points_model in ("poisson", "negbin"):
         for key, col in (("home_count_fit", "home_score"), ("away_count_fit", "away_score")):
             y = feats[col].values.astype(float)
             beta = _fit_poisson(X, y, sample_weight=w)
             alpha = (_nb_alpha(y, np.exp(X @ beta), w) if points_model == "negbin"
                      else 0.0)
             out[key] = _CountModel(beta, points_model, alpha)
+    elif points_model == "pace":
+        from .nba_totals import fit_nba_pace_totals
+        out["pace_fit"] = fit_nba_pace_totals(games, sample_weight=w)
     return out

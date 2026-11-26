@@ -27,8 +27,8 @@ from datetime import date, datetime, timedelta
 import numpy as np
 import pandas as pd
 
-from . import (backfill, bayes_elo, db, mlb_player, nba_player, nfl_player,
-               nhl_player, player_adj, starters)
+from . import (backfill, bayes_elo, db, mlb_player, nba_player, nba_totals,
+               nfl_player, nhl_player, player_adj, starters)
 from .config import db_path, status_path
 from .forecast import carry_margin
 from .hybrid import points_model_for
@@ -86,7 +86,8 @@ def rate_league(conn, league: str, today: date, stan_model, as_of: str = None,
     (bayes_elo.py); an Elo failure publishes the logit alone."""
     t0 = time.monotonic()
     fit_kw = league_fit_kwargs(league)
-    games = db.read_games(conn, league, event_id=fit_kw["starter"])
+    use_pace = points_model_for(league) == "pace"
+    games = db.read_games(conn, league, event_id=fit_kw["starter"] or use_pace)
     sched = todays_schedule(conn, league, today,
                             today + timedelta(days=ahead_days(league)))
     # the model is given every completed game; today's and upcoming games come
@@ -103,6 +104,14 @@ def rate_league(conn, league: str, today: date, stan_model, as_of: str = None,
                 conn, league, done, sched, as_of or _now())
         except Exception as e:
             notes.append(f"starter edges skipped ({type(e).__name__}: {e})")
+            log(traceback.format_exc())
+    if use_pace and conn is not None:
+        # box-score possessions, minutes and regulation points for NBA totals;
+        # a failure falls back to the OLS blend
+        try:
+            done = nba_totals.attach_nba_box_cols(conn, done)
+        except Exception as e:
+            notes.append(f"nba pace stats skipped ({type(e).__name__}: {e})")
             log(traceback.format_exc())
     model_done = done.drop(columns=["espn_event_id"], errors="ignore")
     model_sched = sched.drop(columns=["espn_event_id"], errors="ignore")
@@ -430,7 +439,8 @@ def main(argv=None) -> int:
         parts.append(f"players skipped ({type(e).__name__})")
         log(traceback.format_exc())
 
-    # Team totals the NFL model reads (yards allowed). Never fails the run.
+    # Team totals for the NFL player model (yards allowed) and NBA pace totals.
+    # Never fails the run.
     try:
         from . import team_counts
         lb = team_counts.extract(conn, [lg for lg in leagues if lg in team_counts.LEAGUES], log=log)

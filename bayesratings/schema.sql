@@ -448,7 +448,8 @@ CREATE TABLE IF NOT EXISTS player_extract_log (
 
 -- Team totals per game from the stored summary (bayesratings/team_counts.py).
 -- counts_json is [for, against] in that module's COUNTS order.
--- The NFL player model reads yards allowed from these rows.
+-- The NFL player model reads yards allowed and the NBA totals model reads
+-- possessions, minutes and regulation points from these rows.
 CREATE TABLE IF NOT EXISTS team_game_stats (
     espn_event_id      INTEGER NOT NULL,
     team_id            INTEGER NOT NULL,

@@ -29,7 +29,7 @@ from datetime import date, datetime, timedelta
 
 import pandas as pd
 
-from . import db
+from . import db, nba_totals
 from .publish import save_snapshot
 from .runtime import CHICAGO
 from .hybrid import points_model_for
@@ -98,9 +98,16 @@ def done_days(conn, league: str) -> set:
 def replay_league(conn, league: str, seasons: int, until: str, stan_model,
                   max_days: int = None, sample: int = None, refit: str = "daily",
                   since: str = None, lock_path: str = LOCK_PATH) -> dict:
-    games = db.read_games(conn, league)
+    use_pace = points_model_for(league) == "pace"
+    games = db.read_games(conn, league, event_id=use_pace)
     games["date"] = games["date"].astype(str)
     done = games.dropna(subset=["home_score", "away_score"])
+    if use_pace:
+        try:
+            done = nba_totals.attach_nba_box_cols(conn, done)
+        except Exception as e:
+            log(f"{league}: nba pace stats skipped ({type(e).__name__}: {e})")
+        done = done.drop(columns=["espn_event_id"], errors="ignore")
     nx = db.not_exhibition_sql(db.exhibition_team_ids(conn, league))
     have = done_days(conn, league)
     todo = [d for d in replay_days(conn, league, seasons, until) if d not in have

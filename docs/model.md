@@ -139,14 +139,36 @@ window and weights, with the posterior-mean ratings as features.
 
 - **Margin:** weighted OLS (`mov_fit`). `home_spread = -margin` (negative =
   home favored).
-- **Expected points** per side, by league (`POINTS_MODELS` in `hybrid.py`,
-  chosen by the Oct 2026 walk-forward backtest):
+- **Expected points** per side, by league (`POINTS_MODELS` in `hybrid.py`;
+  MLB and NHL from the Oct 2026 walk-forward, NBA pace model in
+  `docs/decisions/2026-11-26-nba-reg-ot-pace-totals.md`):
 
   | League | Points model |
   |---|---|
   | MLB | negative binomial GLM (log link, IRLS; dispersion estimated) |
   | NHL | Poisson GLM (log link) |
-  | NBA, NFL | OLS, blended: `0.6 × regression + 0.4 × league_avg × OS × DS` (`w_totals = 0.6`; OS/DS = weighted offensive / defensive strength) |
+  | NBA | OLS blend by default; set `BAYESRATINGS_NBA_TOTALS=pace` to enable the regulation pace-efficiency Ridge + margin-dependent OT lift (`nba_totals.py`; falls back to OLS without box-score possessions) |
+  | NFL | OLS, blended: `0.6 × regression + 0.4 × league_avg × OS × DS` (`w_totals = 0.6`; OS/DS = weighted offensive / defensive strength) |
+
+  When `BAYESRATINGS_NBA_TOTALS=pace` is set, `daily.py` and `replay.py` join
+  `poss`, `minutes`, `reg_home_score`, and `reg_away_score` from
+  `team_game_stats` (`team_counts.py` version 5 adds `reg_pts`, the sum of the
+  first four quarter linescores; older v4 rows take final scores as regulation
+  scores where `minutes <= 48.5`). Note that because `team_counts` tracks a
+  single global `VERSION`, the bump to version 5 re-extracts stored
+  `game_summaries` for all four leagues once on the next `extract` or `daily`
+  run (local summaries only, no ESPN calls). On the 90-day decay window and
+  weights:
+  1. Weighted Ridge fits 48-minute regulation possessions on non-OT games
+     (`poss = mu_pace + tau[home] + tau[away]`, `lam_pace = 3.0`).
+  2. Possession-weighted Ridge fits regulation offensive and defensive
+     efficiency per 100 possessions on non-OT games
+     (`eff_home = mu_eff + hca_eff * (1 - neutral) + off[home] + def[away]`,
+     `eff_away = mu_eff - hca_eff * (1 - neutral) + off[away] + def[home]`,
+     `lam_eff = 8.0`).
+  3. An overtime lift (`p_ot(m) * mu_ot`, shrunk toward 6% OT and 22.5 extra
+     points) is added evenly to both sides after neutral-site margin averaging.
+     Win probabilities and spreads do not change.
 
 - **Total** = home points + away points. **Team totals** are then reconciled
   with the margin: `home = clip((total + margin) / 2, 0, total)`, away = the

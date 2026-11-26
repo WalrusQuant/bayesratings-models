@@ -6,17 +6,19 @@ Reads game_summaries (never calls ESPN). Team totals come from the summary
 box; NFL defense, NHL goalies and MLB bullpen come from the summary's player
 box, the same lines players.py stores. Re-extracts when a summary is
 refetched or VERSION grows. The NFL player model reads yards allowed from
-these rows.
+these rows, and the NBA totals model reads possessions, minutes and
+regulation points.
 
 counts_json is [for_counts, against_counts]. Each list follows COUNTS for
 that league (null = that number was not in the box). Against is the
 opponent's for-counts from the same summary, so a filter on one team's
 games still has what they allowed. NBA `poss` is the Basketball-Reference
 estimate (0.4×FTA, an offensive-rebound adjustment, both teams averaged),
-the same number on each side of a game. The NBA Cup championship is stored
-with season_type 0 so it does not count. The label is header["gameNote"]
-("NBA Cup Championship", "NBA In-Season Tournament Championship").
-Semifinals count.
+the same number on each side of a game, and `reg_pts` is the sum of the
+first four quarter linescores (regulation points before overtime). The NBA
+Cup championship is stored with season_type 0 so it does not count. The
+label is header["gameNote"] ("NBA Cup Championship", "NBA In-Season
+Tournament Championship"). Semifinals count.
 """
 
 import argparse
@@ -28,7 +30,7 @@ import time
 
 from . import db
 
-VERSION = 4  # 4: MLB lob is the team total, not the sum of each batter's LOB
+VERSION = 5  # 5: NBA reg_pts (first four quarters) for regulation/OT totals separation
 LEAGUES = ("mlb", "nba", "nfl", "nhl")
 
 # ESPN files the NBA Cup championship as a regular-season game. It does not
@@ -48,7 +50,7 @@ COUNTS = {
             "def_sk", "def_tfl", "def_pd", "def_qbh"),
     "nba": ("fgm", "fga", "tpm", "tpa", "ftm", "fta",
             "oreb", "dreb", "ast", "stl", "blk", "tov", "pf",
-            "fbp", "pip", "pot", "poss", "minutes"),
+            "fbp", "pip", "pot", "poss", "minutes", "reg_pts"),
     "nhl": ("sog", "hits", "blk", "tk", "gv", "ppg", "ppo", "shg",
             "pim", "pen", "fo", "sa", "sv"),
     "mlb": ("ab", "h", "dbl", "tpl", "hr", "bb", "hbp", "k", "sb", "cs",
@@ -296,6 +298,35 @@ def _nba_minutes(summary):
     return None
 
 
+def _nba_reg_pts(summary, eid):
+    """Sum of the first four quarter linescores for one team.
+
+    None when the header has fewer than four quarters or any quarter score is
+    missing. Reads `value` when present and falls back to `displayValue`
+    (ESPN omits `value` on recent NBA summaries).
+    """
+    comp = (((summary.get("header") or {}).get("competitions") or [{}])[0]
+            .get("competitors") or [])
+    target = str(eid)
+    for c in comp:
+        cid = str((c.get("team") or {}).get("id") or c.get("id") or "")
+        if cid != target:
+            continue
+        lines = c.get("linescores") or []
+        if len(lines) < 4:
+            return None
+        total = 0.0
+        for ls in lines[:4]:
+            if not isinstance(ls, dict):
+                return None
+            v = _stat_num(ls)
+            if v is None:
+                return None
+            total += v
+        return _clean(total)
+    return None
+
+
 def _drives(summary, eid, flat):
     drives = (summary.get("drives") or {}).get("previous") or []
     mine = [d for d in drives
@@ -422,7 +453,7 @@ def _nfl(flat, summary, eid, players):
     }
 
 
-def _nba(flat, summary):
+def _nba(flat, summary, eid):
     fg = _pair(flat.get("fieldGoalsMade-fieldGoalsAttempted"))
     tp = _pair(flat.get("threePointFieldGoalsMade-threePointFieldGoalsAttempted"))
     ft = _pair(flat.get("freeThrowsMade-freeThrowsAttempted"))
@@ -443,6 +474,7 @@ def _nba(flat, summary):
         "pot": _num(flat.get("turnoverPoints")),
         # filled once both teams are known; see _bbref_poss
         "poss": None, "minutes": _nba_minutes(summary),
+        "reg_pts": _nba_reg_pts(summary, eid),
     }
 
 
@@ -536,7 +568,7 @@ def parse(summary, league, espn_ids):
             if league == "nfl":
                 d = _nfl(_team_flat(team), summary, eid, players)
             elif league == "nba":
-                d = _nba(_team_flat(team), summary)
+                d = _nba(_team_flat(team), summary, eid)
             elif league == "nhl":
                 d = _nhl(_team_flat(team), players, eid)
             elif league == "mlb":
