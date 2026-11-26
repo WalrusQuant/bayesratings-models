@@ -62,34 +62,36 @@ per-game scoring averages. Two things hurt it in NBA:
 
 ## Walk-forward results
 
-Each test game is scored using only games dated strictly before it, with the
-90-day half-life decay. Intervals are 95% cluster-bootstrap CIs by game day
-(2,000 resamples). Delta is `pace` minus `ols` on the exact same games
-(negative is better).
-
-### Real NBA 2026-27 early-season slice (194 games, 27 days)
-
-Both models trained on the exact same completed 2026-27 games with box-score
-possessions, refit daily after a 60-game warm-up.
-
-| Variant | MAE | Δ MAE | 95% CI (Δ MAE) | RMSE | Δ RMSE | Bias |
-|---|---:|---:|---|---:|---:|---:|
-| `ols` baseline | 16.387 | +0.000 | - | 20.487 | +0.000 | +0.747 |
-| `pace` (`lam_pace=2.5, lam_eff=7.0`) | 14.815 | -1.572 | [-2.313, -0.908] | 19.049 | -1.438 | +0.454 |
-| `pace` (`lam_pace=3.0, lam_eff=8.0`, kept) | 14.759 | -1.627 | [-2.426, -0.922] | 19.025 | -1.462 | +0.436 |
-
-Early-season `ols` is noisy because unshrunk `OS` and `DS` swing hard on a
-few games and a few OT finishes, so the gap here is larger than it will be
-across a full multi-season archive.
-
-### Re-running on a multi-season DB
+Weekly refit (train strictly on games dated before Tuesday, 90-day half-life
+decay, fast weighted-ridge ratings shared by both totals models). Intervals
+are paired 95% cluster-bootstrap CIs by game day (2,000 resamples, seed
+20261126). Delta is `pace` minus `ols` on the exact same games (negative is
+better). Regular season and postseason, 2023-24 through 2026-11-26 (`4,214`
+scored games, `661` days; `4,590` total NBA games with v5 `team_game_stats`
+including late 2022-23 warm-up).
 
 ```bash
 python -m bayesratings.team_counts --db data/bayesratings.db --leagues nba
 python scripts/eval_nba_totals.py --db data/bayesratings.db --seasons 2024,2025,2026,2027
 ```
 
-Pass `--use-stan` to score with Stan Bradley-Terry ratings instead of the
-fast weighted-ridge stand-in. `tests/test_points_model.py` and
-`tests/test_nba_totals.py` lock the model behavior, opt-in toggle, and
-invariants.
+| Season | Variant | Games | Days | MAE | Δ MAE | 95% CI (Δ MAE) | RMSE | Δ RMSE | Bias |
+|---|---|---:|---:|---:|---:|---|---:|---:|---:|
+| 2024 | `ols` | 1313 | 205 | 15.034 | +0.000 | - | 18.870 | +0.000 | +1.940 |
+| 2024 | `pace` | 1313 | 205 | 15.059 | +0.025 | [-0.100, +0.148] | 18.835 | -0.035 | +2.020 |
+| 2025 | `ols` | 1315 | 211 | 14.879 | +0.000 | - | 18.598 | +0.000 | -0.629 |
+| 2025 | `pace` | 1315 | 211 | 14.764 | -0.115 | [-0.216, -0.014] | 18.493 | -0.105 | -0.556 |
+| 2026 | `ols` | 1316 | 209 | 15.197 | +0.000 | - | 19.219 | +0.000 | -0.009 |
+| 2026 | `pace` | 1316 | 209 | 15.148 | -0.049 | [-0.151, +0.056] | 19.121 | -0.098 | -0.054 |
+| 2027 | `ols` | 270 | 36 | 15.559 | +0.000 | - | 19.487 | +0.000 | +2.625 |
+| 2027 | `pace` | 270 | 36 | 15.146 | -0.413 | [-0.696, -0.115] | 19.062 | -0.426 | +2.426 |
+| all | `ols` | 4214 | 661 | 15.070 | +0.000 | - | 18.936 | +0.000 | +0.573 |
+| all | `pace` | 4214 | 661 | 15.001 | -0.070 | [-0.132, -0.007] | 18.834 | -0.102 | +0.595 |
+
+RMSE improves in all four seasons (`-0.102` pooled). Pooled MAE drops by
+`-0.070` with a 95% day-cluster CI excluding zero (`[-0.132, -0.007]`), with
+the largest gain early in a season (`2027: -0.413` MAE) where unshrunk `OS`
+and `DS` are noisiest. Pass `--use-stan` to `scripts/eval_nba_totals.py` to
+re-run with Stan Bradley-Terry ratings instead of the ridge stand-in.
+`tests/test_points_model.py` and `tests/test_nba_totals.py` lock the model
+behavior, opt-in toggle, and invariants.
