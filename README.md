@@ -73,6 +73,7 @@ cp .env.example .env
 | `BAYESRATINGS_STATUS_DIR` | `data/status` | One-line status logs |
 | `BAYESRATINGS_LOCK_DIR` | `data` | Directory for the writer-lock file |
 | `BAYESRATINGS_LOCK` | `$BAYESRATINGS_LOCK_DIR/write.lock` | Full path of that lock file. Overrides the directory |
+| `BAYESRATINGS_NBA_TOTALS` | `ols` | NBA totals model: `ols` or `pace` (opt-in regulation/OT pace-efficiency) |
 
 Existing environment variables win over `.env`. The database file is not
 committed.

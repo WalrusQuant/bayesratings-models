@@ -239,12 +239,6 @@ class _PaceTotalsModel:
         p_ot = np.clip(self.kappa_ot * p_tie, 0.0, MAX_OT_PROB)
         return p_ot * self.mu_ot
 
-    def predict(self, schedule: pd.DataFrame, margin_pred):
-        """Expected full-game points (home, away), regulation + margin-dependent OT."""
-        reg_h, reg_a = self.predict_regulation(schedule)
-        ot_lift = self.expected_ot_points(margin_pred)
-        return reg_h + 0.5 * ot_lift, reg_a + 0.5 * ot_lift
-
 
 def fit_nba_pace_totals(games: pd.DataFrame, sample_weight=None,
                         lam_pace: float = LAM_PACE,

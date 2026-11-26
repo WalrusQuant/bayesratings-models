@@ -1,6 +1,8 @@
 """Per-league expected-points model: MLB negative binomial, NHL Poisson,
-NBA regulation/OT pace-efficiency, NFL keeps the OLS blend. Win probabilities
+NBA OLS blend by default (opt-in regulation/OT pace-efficiency via
+BAYESRATINGS_NBA_TOTALS=pace), NFL keeps the OLS blend. Win probabilities
 and spreads are unchanged."""
+import os
 import numpy as np
 import pandas as pd
 from bayesratings.games import validate_games
@@ -8,11 +10,22 @@ from bayesratings.forecast import forecast_games
 from bayesratings.hybrid import fit_hybrid_models, points_model_for, _fit_poisson, _nb_alpha
 from bayesratings.team_stats import compute_team_stats
 
-# 1. league mapping
+# 1. league mapping (default + NBA opt-in toggle)
 assert points_model_for("mlb") == "negbin" and points_model_for("MLB") == "negbin"
 assert points_model_for("nhl") == "poisson"
-assert points_model_for("nba") == "pace" and points_model_for("NBA") == "pace"
 assert points_model_for("nfl") == "ols"
+_prev_nba = os.environ.pop("BAYESRATINGS_NBA_TOTALS", None)
+try:
+    assert points_model_for("nba") == "ols" and points_model_for("NBA") == "ols"
+    os.environ["BAYESRATINGS_NBA_TOTALS"] = "pace"
+    assert points_model_for("nba") == "pace" and points_model_for("NBA") == "pace"
+    os.environ["BAYESRATINGS_NBA_TOTALS"] = "ols"
+    assert points_model_for("nba") == "ols"
+finally:
+    if _prev_nba is None:
+        os.environ.pop("BAYESRATINGS_NBA_TOTALS", None)
+    else:
+        os.environ["BAYESRATINGS_NBA_TOTALS"] = _prev_nba
 print("ok league mapping")
 
 # 2. Poisson IRLS recovers known coefficients

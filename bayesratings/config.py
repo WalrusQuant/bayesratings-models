@@ -66,3 +66,18 @@ def status_path(name: str) -> str:
 
 def lock_dir() -> str:
     return os.environ.get("BAYESRATINGS_LOCK_DIR", str(ROOT / "data"))
+
+
+def nba_points_model() -> str:
+    """NBA expected-points model: 'ols' (default) or 'pace'.
+
+    Controlled by BAYESRATINGS_NBA_TOTALS (opt-in 'pace' for now).
+    """
+    val = os.environ.get("BAYESRATINGS_NBA_TOTALS", "").strip().lower()
+    if val in ("", "ols"):
+        return "ols"
+    if val == "pace":
+        return "pace"
+    raise ValueError(
+        f"invalid BAYESRATINGS_NBA_TOTALS={val!r} (expected 'ols' or 'pace')"
+    )

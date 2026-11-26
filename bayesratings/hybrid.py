@@ -164,15 +164,19 @@ class _LogisticModel:
 
 
 # Expected-points model per league: MLB negative binomial and NHL Poisson
-# from the 2026-10 walk-forward; NBA regulation/OT pace-efficiency from the
-# 2026-11 walk-forward (falls back to OLS when box-score pace columns are absent).
-# Leagues not listed keep the OLS blend.
-POINTS_MODELS = {"mlb": "negbin", "nhl": "poisson", "nba": "pace"}
+# from the 2026-10 walk-forward. NBA defaults to the OLS blend and switches
+# to "pace" when BAYESRATINGS_NBA_TOTALS=pace is set (falling back to OLS if
+# box-score pace columns are absent). Leagues not listed keep the OLS blend.
+POINTS_MODELS = {"mlb": "negbin", "nhl": "poisson"}
 VALID_POINTS_MODELS = ("ols", "poisson", "negbin", "pace")
 
 
 def points_model_for(league) -> str:
-    return POINTS_MODELS.get(str(league).lower(), "ols")
+    lg = str(league).lower()
+    if lg == "nba":
+        from .config import nba_points_model
+        return nba_points_model()
+    return POINTS_MODELS.get(lg, "ols")
 
 
 def fit_hybrid_models(games: pd.DataFrame, ratings: pd.Series,

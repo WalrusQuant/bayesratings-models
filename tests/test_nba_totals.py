@@ -1,13 +1,16 @@
 """NBA regulation/overtime pace-efficiency totals model tests."""
 
 import gzip
+import importlib.util
 import json
+from pathlib import Path
 import sqlite3
 
 import numpy as np
 import pandas as pd
+import pytest
 
-from bayesratings import db, nba_totals, team_counts
+from bayesratings import config, db, nba_totals, team_counts
 from bayesratings.forecast import forecast_games
 from bayesratings.games import validate_games
 from bayesratings.hybrid import fit_hybrid_models, points_model_for
@@ -239,6 +242,7 @@ def test_margin_dependent_ot_and_hybrid_forecast_invariants():
     # Close game receives strictly larger expected OT points than a blowout,
     # and OT lift is symmetric in margin sign.
     pf = hyb_pace["pace_fit"]
+    assert not hasattr(pf, "predict")
     ot_close = pf.expected_ot_points([0.0, 2.0, -2.0])
     ot_blow = pf.expected_ot_points([15.0, -15.0])
     assert ot_close[0] > ot_blow[0] + 0.3
@@ -388,7 +392,24 @@ def test_db_extract_and_attach_nba_box_cols(tmp_path):
     conn.close()
 
 
-def test_daily_attaches_nba_box_cols_and_uses_pace_model(monkeypatch):
+def test_nba_totals_env_toggle(monkeypatch):
+    monkeypatch.delenv("BAYESRATINGS_NBA_TOTALS", raising=False)
+    assert config.nba_points_model() == "ols"
+    assert points_model_for("nba") == "ols"
+
+    monkeypatch.setenv("BAYESRATINGS_NBA_TOTALS", "pace")
+    assert config.nba_points_model() == "pace"
+    assert points_model_for("nba") == "pace"
+
+    monkeypatch.setenv("BAYESRATINGS_NBA_TOTALS", "OLS")
+    assert points_model_for("nba") == "ols"
+
+    monkeypatch.setenv("BAYESRATINGS_NBA_TOTALS", "bogus")
+    with pytest.raises(ValueError):
+        points_model_for("nba")
+
+
+def test_daily_attaches_nba_box_cols_when_pace_enabled(monkeypatch):
     from bayesratings import daily
 
     seen = {}
@@ -428,6 +449,17 @@ def test_daily_attaches_nba_box_cols_and_uses_pace_model(monkeypatch):
 
     dummy_conn = sqlite3.connect(":memory:")
     try:
+        # Default (unset -> ols): does not require pace columns
+        monkeypatch.delenv("BAYESRATINGS_NBA_TOTALS", raising=False)
+        try:
+            daily.rate_league(dummy_conn, "nba", pd.Timestamp("2026-11-15").date(), None)
+        except Stop:
+            pass
+        assert seen["points_model"] == "ols"
+        assert "poss" not in seen["cols"]
+
+        # Opt-in (pace): attaches box columns and passes points_model="pace"
+        monkeypatch.setenv("BAYESRATINGS_NBA_TOTALS", "pace")
         try:
             daily.rate_league(dummy_conn, "nba", pd.Timestamp("2026-11-15").date(), None)
         except Stop:
@@ -439,3 +471,18 @@ def test_daily_attaches_nba_box_cols_and_uses_pace_model(monkeypatch):
     assert seen["points_model"] == "pace"
     assert {"poss", "minutes", "reg_home_score", "reg_away_score"} <= seen["cols"]
     assert "espn_event_id" not in seen["cols"]
+
+
+def test_eval_nba_totals_script_smoke():
+    script_path = Path(__file__).resolve().parents[1] / "scripts" / "eval_nba_totals.py"
+    spec = importlib.util.spec_from_file_location("eval_nba_totals", script_path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    games, _ = _synthetic_nba_frame(seed=17, n_games=180)
+    scored = mod.evaluate_walkforward(games, refit="weekly", min_train=60)
+    assert len(scored) > 20
+    assert {"season", "date", "actual", "ols_pred", "pace_pred"} <= set(scored.columns)
+    assert np.isfinite(scored["ols_pred"]).all() and np.isfinite(scored["pace_pred"]).all()
+    table = mod.format_report(scored, n_boot=100, seed=1)
+    assert "| ols |" in table and "| pace |" in table

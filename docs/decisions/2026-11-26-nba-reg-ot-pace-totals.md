@@ -1,8 +1,8 @@
 # 2026-11-26 — NBA regulation/OT pace totals
 
-Walk-forward test of a pace-and-efficiency model for NBA totals
-(`POINTS_MODELS["nba"] = "pace"`). Ratings, win probabilities, and spreads
-stay the same.
+Opt-in pace-and-efficiency model for NBA expected points (`BAYESRATINGS_NBA_TOTALS=pace`;
+default stays `ols` pending a full multi-season replay). Ratings, win
+probabilities, and spreads stay the same.
 
 ## Why change it
 
@@ -22,7 +22,12 @@ per-game scoring averages. Two things hurt it in NBA:
   of `COUNTS["nba"]`), the sum of each team's first four quarter linescores
   from the stored ESPN summary (`value`, falling back to `displayValue`).
   Indices `0..17` stay where they are (`poss` at 16, `minutes` at 17), and
-  the SQLite schema does not change.
+  the SQLite schema does not change. Because `_pending()` checks a single
+  global `VERSION`, bumping `VERSION` to 5 re-extracts stored `game_summaries`
+  for all four leagues (`mlb`, `nba`, `nfl`, `nhl`) once on the next
+  `extract` or `daily` run (local summaries only, no ESPN calls).
+- `bayesratings/config.py`: adds `nba_points_model()` backed by
+  `BAYESRATINGS_NBA_TOTALS` (`ols` by default, `pace` to opt in).
 - `bayesratings/nba_totals.py`:
   - `attach_nba_box_cols(conn, games)` joins `poss`, `minutes`,
     `reg_home_score`, and `reg_away_score` from `team_game_stats`. It skips
@@ -43,14 +48,17 @@ per-game scoring averages. Two things hurt it in NBA:
        OT rate and 22.5 extra points:
        `p_ot(m) = clip(kappa * [Phi((0.5 - m) / sigma_m) - Phi((-0.5 - m) / sigma_m)], 0, 0.25)`,
        multiplied by `mu_ot`.
-  - If `poss` is missing or fewer than 15 non-OT games have valid possessions,
+  - If `poss` is missing or fewer than 15 non-OT games have valid box scores,
     `fit_nba_pace_totals` returns `None` and the forecast falls back to the
     OLS blend.
 - `bayesratings/hybrid.py`, `forecast.py`, `daily.py`, `replay.py`: adds
-  `"pace"` to `VALID_POINTS_MODELS`, sets `POINTS_MODELS["nba"] = "pace"`,
-  attaches NBA box-score columns before `run_model`, and adds the OT lift
-  after neutral-site margin averaging so swapped neutral games stay symmetric
-  and team totals still line up with the spread.
+  `"pace"` to `VALID_POINTS_MODELS`, routes NBA through `config.nba_points_model()`,
+  attaches NBA box-score columns before `run_model` when `pace` is enabled,
+  and adds the OT lift after neutral-site margin averaging so swapped neutral
+  games stay symmetric and team totals still line up with the spread.
+- `scripts/eval_nba_totals.py`: read-only walk-forward evaluator against a
+  SQLite database for multi-season comparison (`ols` vs `pace`, weekly or
+  daily refit, day-clustered 95% bootstrap CIs by season and pooled).
 
 ## Walk-forward results
 
@@ -59,7 +67,7 @@ Each test game is scored using only games dated strictly before it, with the
 (2,000 resamples). Delta is `pace` minus `ols` on the exact same games
 (negative is better).
 
-### Real NBA 2026-27 (194 games, 27 days)
+### Real NBA 2026-27 early-season slice (194 games, 27 days)
 
 Both models trained on the exact same completed 2026-27 games with box-score
 possessions, refit daily after a 60-game warm-up.
@@ -72,22 +80,16 @@ possessions, refit daily after a 60-game warm-up.
 
 Early-season `ols` is noisy because unshrunk `OS` and `DS` swing hard on a
 few games and a few OT finishes, so the gap here is larger than it will be
-late in a season.
+across a full multi-season archive.
 
-### 4-season synthetic NBA (4,575 games, 651 days)
+### Re-running on a multi-season DB
 
-30 teams, 65% intra-conference schedule, season-to-season drift, NBA-scale
-pace and efficiency noise, ~4.5-6% overtime rate, weekly refit matching
-`replay.py`.
+```bash
+python -m bayesratings.team_counts --db data/bayesratings.db --leagues nba
+python scripts/eval_nba_totals.py --db data/bayesratings.db --seasons 2024,2025,2026,2027
+```
 
-| Variant | MAE | Δ MAE | 95% CI (Δ MAE) | RMSE | Δ RMSE |
-|---|---:|---:|---|---:|---:|
-| `ols` baseline | 14.831 | +0.000 | - | 18.845 | +0.000 |
-| `pace` (`lam_pace=2.5, lam_eff=7.0`) | 14.728 | -0.103 | [-0.166, -0.041] | 18.704 | -0.141 |
-| `pace` (`lam_pace=3.0, lam_eff=8.0`, kept) | 14.728 | -0.104 | [-0.169, -0.039] | 18.706 | -0.139 |
-
-`lam_pace = 3.0` and `lam_eff = 8.0` sit close to the theoretical
-`sigma_noise^2 / sigma_team^2` ratio for the 90-day decay window. Both MAE
-and RMSE drop on both tests with 95% intervals excluding zero.
-`tests/test_points_model.py` and `tests/test_nba_totals.py` lock the model
-behavior and invariants.
+Pass `--use-stan` to score with Stan Bradley-Terry ratings instead of the
+fast weighted-ridge stand-in. `tests/test_points_model.py` and
+`tests/test_nba_totals.py` lock the model behavior, opt-in toggle, and
+invariants.
